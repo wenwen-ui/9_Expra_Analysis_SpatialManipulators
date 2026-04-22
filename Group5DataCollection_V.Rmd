@@ -1,0 +1,193 @@
+---
+title: "ExPra_fetch_participantData"
+author: "Noah Rischert"
+date: "2025-04-01"
+output:
+  word_document: default
+  html_document:
+    code_folding: hide
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+# Set global chunk options
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE, 
+                      warning = FALSE)
+```
+
+## Introduction
+
+This R Markdown document demonstrates how to:
+
+1. Install and load the **smartr** package from GitHub,  
+2. Set your working directory, and  
+3. Use the `get_JATOS_data()` function to fetch experiment data from a JATOS server.
+
+
+!! NOTE: You will need to be either at UZH or on the UZH VPN to access the data server !!
+
+---
+
+## 1. Install (or Update) the Required Packages
+
+Here, we install **smartr** directly from GitHub using `devtools::install_github()`.
+
+```{r install-packages}
+# If 'devtools' is not installed, uncomment and run the line below:
+install.packages("devtools")
+
+# Install the 'smartr' package from GitHub. This package will allow us to fetch the data from the JATOS server.
+
+# Notiz: Hineinkopiert von Vicki
+install.packages("smartR")
+install.packages("devtools")
+devtools::install_github("smartR")
+install.packages("rlang")
+
+# When installing the smartr package, please select "3" (None) for the updates and "no" for installing from sources the packages which need compilation.
+
+# The package smartr was updated. We can therefore:
+# remove.packages("smartr")  # remove any old installation
+
+#restart R completely ("Session>Restart R" or just close and reopen rstudio)
+
+#Install the packages again. Once is enough, you don't need to do this every time you run the this file.
+devtools::install_github("chenyu-psy/smartr@develop")
+
+
+# Tydiverse is a very useful package for data analysis. We will look at it next week.
+#install.packages("tidyverse")
+
+# Load the package into your session
+library(smartr)
+library(tidyverse)
+
+```
+
+---
+
+## 2. Set Your Working Directory
+
+To make our workflow more efficient, we need to make sure that our working directory makes sense.
+Below is one approach to ensure your working directory is set to the folder containing this R Markdown file.  
+When we're using RStudio, `rstudioapi::getActiveDocumentContext()` can help, but note that it only works interactively, *not* when knitting.
+
+```{r set-wd, eval=FALSE}
+# Example: Set working directory to the current file's location in RStudio
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+# Or manually set your working directory:
+# setwd("C:/Path/To/Your/Folder")
+
+# Check whether this worked:
+getwd()
+```
+
+---
+
+## 3. Fetch JATOS Data with `get_JATOS_data()`
+
+
+In practice, replace the placeholders (`your_token`, `your_study_id`, `your_batch_id`) with your actual token and IDs.
+
+
+!! NOTE: If you call to the server to grab the data while a participant is currently running the study,
+the partial data will be downloaded. If you run this again in the future, R will see that you already
+have downloaded this participant's data and will NOT download the new complete dataset for this participant.
+Before running this code, locate the local file containing the metadata (by default, this will be a folder 
+in the current directory of R with the name "ExPraData"). Inside you will see a metadata file and a JATOS folder.
+Delete both of these items. !!
+
+```{r fetch-data}
+# Define your parameters
+your_token <- "jap_fvOoehoOVsH0g3plDGXIuGmY743rf5d81b0ef"
+
+your_batch_id <- "1725" # Again, this can be different for each group.
+
+# Optionally specify a path for saving data (default is the working directory)
+data_output_path <- "./ExPraData/"
+if(!dir.exists(data_output_path)) dir.create(data_output_path)
+
+# Fetch the data
+jatos_data <- get_JATOS_data(
+  token     = your_token,
+  batchId   = your_batch_id,
+  dataPath  = data_output_path,
+  attachments = FALSE
+)
+
+# This function gives us 2 things: 
+# A metadata file called jatos_data, which contains information about the data we have downloaded
+# The actual downloaded data, at our specified location
+
+# Print a preview of the data
+head(jatos_data)
+
+# Also make sure to look at the metadata file (jatos_data) itself.
+```
+
+### Notes on the `get_JATOS_data()` Function
+
+- **`token`**: Create a JATOS personal access token under your user account on the JATOS server.  
+- **`batchId`**: Each study can have multiple batch sessions (e.g., one for a student pool, one for external participants). Provide one or more batch IDs in a vector.  
+- **`dataPath`**: Where downloaded data and metadata files will be saved (default: working directory).  
+
+---
+
+## 4. Using the metadata, we can filter for the data of participants that actually completed the experiment.
+
+```{r participant-numbers}
+# Filter the metadata for files that actually contain a file.
+filtered_metadata <- jatos_data %>% 
+  filter(!is.na(file))
+
+# We could also filter by other criteria, for example the file size. If the file size is very very small, we know it can't contain a full dataset.
+# For example:
+# THIS STEP LARGLY DEPENDS ON YOUR OWN EXPERIMENT. DO NOT BLINDLY RUN IT WITHOUT CHECKING OUT YOUR FILE SIZES FIRST, OR YOU RISK REMOVING VALID EXPERIMENTAL DATA
+filtered_metadata <- filtered_metadata %>%
+  filter(fileSize >100)
+
+```
+
+---
+
+## 5. Lets also look at a dataframe. Does it look like what we might expect?
+
+```{r df-inspection}
+# Lets just look at a single file of those we downloaded. We use the metadata to access our downloaded data, as the metadata contains all the existing file paths.
+single_participant_df <- read_json_data(filtered_metadata$file[1])
+
+# Now we can look at single_participant_df and check whether the data looks as expected.
+```
+
+
+## 6. Finally, we can combine the Data from All Participants
+
+```{r df-combined}
+# Now we parse *all* the 'data.txt' files for the current batch. Again, all paths are listed in the metadata file under $file.
+all_participants_df <- read_json_data(filtered_metadata$file)
+```
+
+## 7. Now we can filter for the subject hour information
+
+```{r subject hours}
+survey_responses <- all_participants_df %>%
+  # Keep only the survey trials
+  filter(trial_type == "survey") %>%
+  # We only need subject and response columns right now
+  select(participant, response) %>%
+  # Unnest the list column so that each response item becomes its own row
+  unnest_longer(response, indices_to = "question", values_to = "answer") %>%
+  # Now pivot from long to wide, making question names into columns
+  pivot_wider(
+    names_from  = question,
+    values_from = answer
+  )
+```
+
+## 8. Calculate the number of participants collected
+
+```{r subject count}
+sprintf("%i Participants Collected", length(unique(na.omit(all_participants_df$participant))))
+```

@@ -36,14 +36,18 @@ Here, we install **smartr** directly from GitHub using `devtools::install_github
 ```{r install-packages}
 # If 'devtools' is not installed, uncomment and run the line below:
 install.packages("devtools")
+library(devtools)
 
 # Install the 'smartr' package from GitHub. This package will allow us to fetch the data from the JATOS server.
 
-# Notiz: Hineinkopiert von Vicki
-install.packages("smartR")
-install.packages("devtools")
-devtools::install_github("smartR")
-install.packages("rlang")
+## Notiz: Hineinkopiert von Vicki (memories)
+# install.packages("smartR")
+# install.packages("devtools")
+# devtools::install_github("smartR")
+# install.packages("rlang")
+# remove.packages("rlang")
+# pak::pkg_install("r-lib/rlang")
+# pkgbuild::check_build_tools(debug = TRUE)
 
 # When installing the smartr package, please select "3" (None) for the updates and "no" for installing from sources the packages which need compilation.
 
@@ -53,11 +57,12 @@ install.packages("rlang")
 #restart R completely ("Session>Restart R" or just close and reopen rstudio)
 
 #Install the packages again. Once is enough, you don't need to do this every time you run the this file.
-devtools::install_github("chenyu-psy/smartr@develop")
+#devtools::install_github("chenyu-psy/smartr@develop")
+install_github("chenyu-psy/smartr@develop")
 
 
 # Tydiverse is a very useful package for data analysis. We will look at it next week.
-#install.packages("tidyverse")
+install.packages("tidyverse")
 
 # Load the package into your session
 library(smartr)

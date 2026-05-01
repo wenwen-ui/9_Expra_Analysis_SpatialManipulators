@@ -166,7 +166,7 @@ head(single_participant_df)
 # Now we parse *all* the 'data.txt' files for the current batch. Again, all paths are listed in the metadata file under $file.
 all_participants_df <- read_json_data(filtered_metadata$file)
 head(all_participants_df)
-all_participants_df$response
+# all_participants_df$response
 ```
 
 ## 7. Now we can filter for the subject hour information
@@ -251,7 +251,7 @@ head(all_participants_df)
 # all_hues
 # trial_index
 # probe_side
-# reaction_time_from_click
+# reaction_time_from_click <- maybe??
 ```
 
 ## 10. Other notes
@@ -261,3 +261,176 @@ We created a repositary on github. We are aware on how to pull/push files and we
 We have read the notes and therefore delete the metadate as well as the JATOS data.
 
 Thank you :)
+
+## 11. further coding to do
+- data exclusion: less than 80& performance (mean error of more than 45 degrees)
+- filter practice trial
+
+## 12. assumption check, outlier analysis, data exclusion
+```{r}
+
+# create data set by participant and mean
+
+mean_participant <- all_participants_df %>% 
+  filter(procedure == "experiment") %>% 
+  mutate(absError = abs(hue_error)) %>% 
+  group_by(participant) %>% 
+  summarise(meani = mean(absError)) 
+
+# histogramm of mean error plus cutoff at mean + 2*sd 
+
+hist(mean_participant$meani, prob = TRUE, ylim = c(0, 0.05), main = "mean error")
+lines(density(mean_participant$meani), col = "red")
+abline(v = mean(mean_participant$meani) + 2 * sd(mean_participant$meani), col = "blue")
+
+# View(mean_participant)
+
+par(mfrow = c(2, 2))
+
+index <- seq(1.25, 2, by = 0.25)
+
+# precompute mean and sd
+
+m <- mean(mean_participant$meani, na.rm = TRUE)
+s <- sd(mean_participant$meani, na.rm = TRUE)
+
+filtered_participant <- vector("list", length(index))
+
+# look for ideal cut off for exclusion (mean error-wise)
+
+for (i in seq_along(index)) {
+  filtered_participant[[i]] <- mean_participant %>%
+    filter(meani <= m + index[i] * s)
+  
+  qqnorm(filtered_participant[[i]]$meani, main = paste("k =", index[i]))
+  qqline(filtered_participant[[i]]$meani, col = "red")
+}
+
+ks_results <- vector("list", length(index))
+
+for (i in seq_along(index)) {
+  filtered_participant[[i]] <- mean_participant %>%
+    filter(meani <= m + index[i] * s)
+  
+   ks_results[[i]] <- ks.test(
+    filtered_participant[[i]]$meani,
+    "pnorm",
+    mean = mean(filtered_participant[[i]]$meani),
+    sd = sd(filtered_participant[[i]]$meani)
+   )
+}
+
+ks_results
+
+# Conclusion: define excluded outliers everything above mean + 2*sd
+
+cutoff <- mean(mean_participant$meani) + 2 * sd(mean_participant$meani)
+
+excluded <- mean_participant$participant[mean_participant$meani >= cutoff]
+
+excluded # list of excluded participants
+
+# check for reaction time
+
+rt_participant <- all_participants_df %>% 
+  filter(procedure == "experiment") %>% 
+  group_by(participant) %>% 
+  summarise(mean_RT = mean(reaction_time))
+# View(rt_participant)
+par(mfrow=c(1,1))
+hist(rt_participant$mean_RT, prob = TRUE, main = "reaction time")
+lines(density(rt_participant$mean_RT, na.rm = TRUE), col = "red")
+cutoff_rt <- mean(rt_participant$mean_RT, na.rm  = TRUE) + 2 * sd(rt_participant$mean_RT, na.rm  = TRUE)
+abline(v = cutoff_rt, col = "blue")
+
+# who? 
+
+excl_rt <- rt_participant$participant[rt_participant$mean_RT >= cutoff_rt]
+excl_rt
+
+# Conclusion: two diff subsets of possibly excluding participants, shall we also exclude super slow subjects???
+```
+
+## 13. main data set + visual impression before analysis
+
+```{r}
+# create subset
+
+df_mean_main <- all_participants_df %>%
+  filter(procedure == "experiment") %>%
+  filter(!participant %in% excluded) %>% 
+  select(tess_level, isi_duration, hue_error) %>% 
+  mutate(abs_hue = abs(hue_error)) %>% 
+  group_by(isi_duration, tess_level) %>% 
+  summarise(mean_response_error = mean(abs_hue)) %>% 
+  mutate(col = ceiling(sqrt(tess_level))) # for color coding
+df_mean_main$col[df_mean_main$col == 9] <- 4 # for aesthetics
+
+df_mean_main <- na.omit(df_mean_main)
+
+# View(df_main)
+
+# Plot data
+
+library(ggplot2)
+
+ggplot(df_mean_main, aes(x = isi_duration, y = mean_response_error, color = factor(col))) +
+  geom_point() +
+  geom_line() +
+  scale_color_discrete(
+    name = "Tessellation",
+    labels = c("1x1", "3x3", "9x9", "81x81")
+  )
+```
+
+## 14. Main Analysis - ANOVA
+```{r}
+# install.packages("afex")
+library(afex)
+
+# create subset
+
+anova_df <- all_participants_df %>% 
+  filter(procedure == "experiment") %>%
+  filter(!participant %in% excluded) %>% 
+  select(participant, isi_duration, tess_level, hue_error) %>% 
+  mutate(abs_hue = abs(hue_error)) 
+
+# View(anova_df)
+
+# Model
+
+aov_full <- aov_ez(
+  id = "participant",
+  dv = "abs_hue",
+  data = anova_df,
+  within = c("isi_duration", "tess_level")
+)
+
+summary(aov_full) # results
+
+nice(aov_full) # check interaction
+```
+
+## 15. Posthoc Analysis 
+
+```{r}
+# ISI fix
+
+library(emmeans)
+
+emm <- emmeans(aov_full, ~ tess_level | isi_duration)
+
+pairs(emm, adjust = "holm")
+
+# tess_level fix
+
+emmm <- emmeans(aov_full, ~ isi_duration | tess_level)
+
+pairs(emmm, adjust = "holm")
+```
+
+## 16. Further questions.
+Recommendation was to Install package “performance”: homogeneity + sphericity tests. This was not done. I thought aov_ez is already accounting for homogeneity and sphericity (testing and correcting). Is this step still necessary?
+
+Also regarding exclusion due to reaction time. We have two diff subsets of possibly excluded participants, shall we also exclude super slow subjects???
